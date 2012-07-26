@@ -2,6 +2,7 @@ require 'net/https'
 require 'json'
 require 'net/http/post/multipart'
 require 'date'
+require 'rforce'
 
 module Databasedotcom
   # Interface for operating the Force.com REST API
@@ -36,6 +37,10 @@ module Databasedotcom
     attr_accessor :ca_file
     # The SSL verify mode configured for this instance, if any
     attr_accessor :verify_mode
+    # Login via username and password SOAP API, session_id based auth
+    attr_accessor :login_via_soap
+    # Session id for login via soap
+    attr_accessor :session_id
 
     # Returns a new client object. _options_ can be one of the following
     #
@@ -98,9 +103,11 @@ module Databasedotcom
     # * If _options_ contains the keys <tt>:username</tt> and <tt>:password</tt>, those credentials are used to authenticate. In this case, the value of <tt>:password</tt> may need to include a concatenated security token, if required by your Salesforce org
     # * If _options_ contains the key <tt>:provider</tt>, it is assumed to be the hash returned by Omniauth from a successful web-based OAuth2 authentication
     # * If _options_ contains the keys <tt>:token</tt> and <tt>:instance_url</tt>, those are assumed to be a valid OAuth2 token and instance URL for a Salesforce account, obtained from an external source. _options_ may also optionally contain the key <tt>:refresh_token</tt>
+    # * If _options_ contains the keys <tt>:loginViaSOAP</tt> it is assumed you want login via the SOAP API and old session_id method
     #
     # Raises SalesForceError if an error occurs
     def authenticate(options = nil)
+      self.version = "22.0" unless self.version
       if user_and_pass?(options)
         req = https_request(self.host)
         user = self.username || options[:username]
@@ -113,6 +120,27 @@ module Databasedotcom
         self.username = user
         self.password = pass
         parse_auth_response(result.body)
+        self.oauth_token
+      elsif user_and_pass_via_soap?(options)
+        user = self.username || options[:username]
+        pass = self.password || options[:password]
+        version = self.version || options[:version]
+        session_id = self.session_id || options[:session_id]
+        login_soap = self.login_via_soap || options[:login_via_soap]
+        
+        path = "/services/Soap/u/#{version}"
+        url = "https://#{self.host}/#{path}"
+        binding = RForce::Binding.new(url, session_id)
+        response = binding.login(user, pass)
+        
+        self.username = user
+        self.password = pass
+        self.version = version
+        self.login_via_soap = login_soap
+
+        parse_soap_auth_response(response)
+
+        self.session_id
       elsif options.is_a?(Hash)
         if options.has_key?("provider")
           parse_user_id_and_org_id_from_identity_url(options["uid"])
@@ -125,11 +153,8 @@ module Databasedotcom
           self.oauth_token = options[:token]
           self.refresh_token = options[:refresh_token]
         end
+        self.oauth_token
       end
-
-      self.version = "22.0" unless self.version
-
-      self.oauth_token
     end
 
     # The SalesForce organization id for the authenticated user's Salesforce instance
@@ -286,17 +311,16 @@ module Databasedotcom
     # HTTPSuccess- raises SalesForceError otherwise.
     def http_get(path, parameters={}, headers={})
       with_encoded_path_and_checked_response(path, parameters) do |encoded_path|
-        https_request.get(encoded_path, {"Authorization" => "OAuth #{self.oauth_token}"}.merge(headers))
+        https_request.get(encoded_path, authorization_header.merge(headers))
       end
     end
-
 
     # Performs an HTTP DELETE request to the specified path (relative to self.instance_url).  Query parameters are included from _parameters_.  The required
     # +Authorization+ header is automatically included, as are any additional headers specified in _headers_.  Returns the HTTPResult if it is of type
     # HTTPSuccess- raises SalesForceError otherwise.
     def http_delete(path, parameters={}, headers={})
       with_encoded_path_and_checked_response(path, parameters, {:expected_result_class => Net::HTTPNoContent}) do |encoded_path|
-        https_request.delete(encoded_path, {"Authorization" => "OAuth #{self.oauth_token}"}.merge(headers))
+        https_request.delete(encoded_path, authorization_header.merge(headers))
       end
     end
 
@@ -305,7 +329,7 @@ module Databasedotcom
     # headers specified in _headers_.  Returns the HTTPResult if it is of type HTTPSuccess- raises SalesForceError otherwise.
     def http_post(path, data=nil, parameters={}, headers={})
       with_encoded_path_and_checked_response(path, parameters, {:data => data}) do |encoded_path|
-        https_request.post(encoded_path, data, {"Content-Type" => data ? "application/json" : "text/plain", "Authorization" => "OAuth #{self.oauth_token}"}.merge(headers))
+        https_request.post(encoded_path, data, authorization_header.merge({"Content-Type" => data ? "application/json" : "text/plain"}).merge(headers))
       end
     end
 
@@ -314,7 +338,7 @@ module Databasedotcom
     # headers specified in _headers_.  Returns the HTTPResult if it is of type HTTPSuccess- raises SalesForceError otherwise.
     def http_patch(path, data=nil, parameters={}, headers={})
       with_encoded_path_and_checked_response(path, parameters, {:data => data}) do |encoded_path|
-        https_request.send_request("PATCH", encoded_path, data, {"Content-Type" => data ? "application/json" : "text/plain", "Authorization" => "OAuth #{self.oauth_token}"}.merge(headers))
+        https_request.send_request("PATCH", encoded_path, data, authorization_header.merge({"Content-Type" => data ? "application/json" : "text/plain"}).merge(headers))
       end
     end
 
@@ -324,7 +348,7 @@ module Databasedotcom
     # Returns the HTTPResult if it is of type HTTPSuccess- raises SalesForceError otherwise.
     def http_multipart_post(path, parts, parameters={}, headers={})
       with_encoded_path_and_checked_response(path, parameters) do |encoded_path|
-        https_request.request(Net::HTTP::Post::Multipart.new(encoded_path, parts, {"Authorization" => "OAuth #{self.oauth_token}"}.merge(headers)))
+        https_request.request(Net::HTTP::Post::Multipart.new(encoded_path, parts, authorization_header.merge(headers)))
       end
     end
 
@@ -525,9 +549,17 @@ module Databasedotcom
     end
 
     def user_and_pass?(options)
-      (self.username && self.password) || (options && options[:username] && options[:password])
+      (self.username && self.password) || (options && options[:username] && options[:password] && options[:login_via_soap].nil?)
     end
 
+    def user_and_pass_via_soap?(options)
+      (self.username && self.password && self.login_via_soap) || (options && options[:username] && options[:password] && options[:login_via_soap])
+    end
+    
+    def authorization_header
+      self.login_via_soap ? {"Authorization" => "Bearer #{self.session_id}"} : {"Authorization" => "OAuth #{self.oauth_token}"}
+    end
+    
     def parse_user_id_and_org_id_from_identity_url(identity_url)
       m = identity_url.match(/\/id\/([^\/]+)\/([^\/]+)$/)
       @org_id = m[1] rescue nil
@@ -539,6 +571,13 @@ module Databasedotcom
       parse_user_id_and_org_id_from_identity_url(json["id"])
       self.instance_url = json["instance_url"]
       self.oauth_token = json["access_token"]
+    end
+
+    def parse_soap_auth_response(response)
+      @org_id = response[:loginResponse][:result][:organizationId] rescue nil
+      @user_id = response[:loginResponse][:result][:userId] rescue nil
+      self.instance_url = response[:loginResponse][:result][:serverUrl] rescue nil
+      self.session_id = response[:loginResponse][:result][:sessionId] rescue nil
     end
 
     def query_org_id
