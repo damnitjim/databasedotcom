@@ -242,6 +242,98 @@ describe Databasedotcom::Client do
         end
       end
     end
+    
+    context "with a username, password, and login via SOAP token based auth" do
+      it "requests client authentication" do
+        soap_auth_response = {:loginResponse=>{:result=>{:metadataServerUrl=>"https://cs13-api.salesforce.com/services/Soap/m/22.0/00DW0000000I3Jy", :passwordExpired=>"false", :sandbox=>"true", :serverUrl=>"https://cs13-api.salesforce.com/services/Soap/u/22.0/00DW0000000I3Jy", :sessionId=>"00DW0000000I3Jy!AQoAQJQ0TngfBEEMxvHCj3v_NUHOmQ882urT_KgO58XOV4iq.lQfD.M1Cw3h4BeF.XuCpWht6vKWEhW_mpR7T0810DLQQsCJ", :userId=>"00550000001DDUSAA4", :userInfo=>{:accessibilityMode=>"false", :currencySymbol=>nil, :orgAttachmentFileSizeLimit=>"7340032", :orgDefaultCurrencyIsoCode=>nil, :orgDisallowHtmlAttachments=>"false", :orgHasPersonAccounts=>"false", :organizationId=>"00DW0000000I3JyMAK", :organizationMultiCurrency=>"true", :organizationName=>"Rackspace", :profileId=>"00e50000000v6BVAAY", :roleId=>"00E50000000vjO3EAI", :sessionSecondsValid=>"28800", :userDefaultCurrencyIsoCode=>"USD", :userEmail=>"is_o2o@rackspace.com.core", :userFullName=>"PM User", :userId=>"00550000001DDUSAA4", :userLanguage=>"en_US", :userLocale=>"en_US", :userName=>"pm.user@rackspace.com.core", :userTimeZone=>"America/Chicago", :userType=>"Standard", :userUiSkin=>"Theme3"}}}}
+        
+        username = 'salesforcetard'
+        password = 'secret'
+        rforce_binding = double("rforce")
+        RForce::Binding.should_receive(:new). with('https://bro.baz//services/Soap/u/88', nil) { rforce_binding }
+        rforce_binding.should_receive(:login).with(username, password).and_return(soap_auth_response)
+
+        lambda {
+          @client.authenticate(:username => username, :password => password, :login_via_soap => true)
+        }.should_not raise_error
+      end
+
+      context "with a success response" do
+        before do
+          @username = 'someguy'
+          @password = 'somepassword'
+          @sessionId = '00DW0000000I3Jy!AQoAQJQ0TngfBEEMxvHCj3v_NUHOmQ882urT_KgO58XOV4iq.lQfD.M1Cw3h4BeF.XuCpWht6vKWEhW_mpR7T0810DLQQsCJ'
+          @serverUrl = "https://stoopid-api.salesforce.com/services/Soap/u/22.0/00DW0000000I3Jy"
+          @userId = "00550000001DDUSAA4"
+          @organizationId = '00DW0000000I3JyMAK'
+          soap_auth_response = {:loginResponse=>{:result=>{:metadataServerUrl=>@serverUrl, :passwordExpired=>"false", :sandbox=>"true", :serverUrl=>@serverUrl, :sessionId=>@sessionId, :userId=>@userId, :userInfo=>{:accessibilityMode=>"false", :currencySymbol=>nil, :orgAttachmentFileSizeLimit=>"7340032", :orgDefaultCurrencyIsoCode=>nil, :orgDisallowHtmlAttachments=>"false", :orgHasPersonAccounts=>"false", :organizationId=>@organizationId, :organizationMultiCurrency=>"true", :organizationName=>"Rackspace", :profileId=>"00e50000000v6BVAAY", :roleId=>"00E50000000vjO3EAI", :sessionSecondsValid=>"28800", :userDefaultCurrencyIsoCode=>"USD", :userEmail=>"is_o2o@rackspace.com.core", :userFullName=>"PM User", :userId=>"00550000001DDUSAA4", :userLanguage=>"en_US", :userLocale=>"en_US", :userName=>"pm.user@rackspace.com.core", :userTimeZone=>"America/Chicago", :userType=>"Standard", :userUiSkin=>"Theme3"}}}}
+          rforce_binding = double("rforce")
+          RForce::Binding.should_receive(:new). with('https://bro.baz//services/Soap/u/88', nil) { rforce_binding }
+          rforce_binding.should_receive(:login).with(@username, @password).and_return(soap_auth_response)
+        end
+      
+        it "parses response and obtains the sessionId" do
+          @client.authenticate(:username => @username, :password => @password, :login_via_soap => true)
+          @client.session_id.should == @sessionId
+        end
+      
+        it "remembers the instance url" do
+          @client.authenticate(:username => @username, :password => @password, :login_via_soap => true)
+          @client.instance_url.should == @serverUrl
+        end
+              
+        it "returns the token" do
+          @client.authenticate(:username => @username, :password => @password, :login_via_soap => true).should == @sessionId
+        end
+              
+        it "sets username and password" do
+          @client.authenticate(:username => @username, :password => @password, :login_via_soap => true)
+          @client.username.should == @username
+          @client.password.should == @password
+        end
+              
+        it "sets the user_id and org_id" do
+          @client.instance_variable_set('@org_id', 'setthevalue')
+          @client.authenticate(:username => @username, :password => @password, :login_via_soap => true)
+          @client.user_id.should == @userId
+          @client.org_id.should == @organizationId
+        end
+      end
+
+      context "with an error response" do
+        before do
+          @username = 'someguy'
+          @password = 'somepassword'
+          @sessionId = '00DW0000000I3Jy!AQoAQJQ0TngfBEEMxvHCj3v_NUHOmQ882urT_KgO58XOV4iq.lQfD.M1Cw3h4BeF.XuCpWht6vKWEhW_mpR7T0810DLQQsCJ'
+          @serverUrl = "https://stoopid-api.salesforce.com/services/Soap/u/22.0/00DW0000000I3Jy"
+          @userId = "00550000001DDUSAA4"
+          @organizationId = '00DW0000000I3JyMAK'
+          soap_auth_response = {:loginResponse=>{:result=>{:metadataServerUrl=>@serverUrl, :passwordExpired=>"false", :sandbox=>"true", :serverUrl=>@serverUrl, :sessionId=>@sessionId, :userId=>@userId, :userInfo=>{:accessibilityMode=>"false", :currencySymbol=>nil, :orgAttachmentFileSizeLimit=>"7340032", :orgDefaultCurrencyIsoCode=>nil, :orgDisallowHtmlAttachments=>"false", :orgHasPersonAccounts=>"false", :organizationId=>@organizationId, :organizationMultiCurrency=>"true", :organizationName=>"Rackspace", :profileId=>"00e50000000v6BVAAY", :roleId=>"00E50000000vjO3EAI", :sessionSecondsValid=>"28800", :userDefaultCurrencyIsoCode=>"USD", :userEmail=>"is_o2o@rackspace.com.core", :userFullName=>"PM User", :userId=>"00550000001DDUSAA4", :userLanguage=>"en_US", :userLocale=>"en_US", :userName=>"pm.user@rackspace.com.core", :userTimeZone=>"America/Chicago", :userType=>"Standard", :userUiSkin=>"Theme3"}}}}
+          rforce_binding = double("rforce")
+          RForce::Binding.should_receive(:new). with('https://bro.baz//services/Soap/u/88', nil) { rforce_binding }
+          error = RuntimeError.new('Incorrect user name / password')
+          rforce_binding.should_receive(:login).with(@username, @password).and_raise(error)
+        end
+      
+        it "raises Databasedotcom::SalesForceError" do
+          lambda {
+            @client.authenticate(:username => @username, :password => @password, :login_via_soap => true)
+          }.should raise_error(RuntimeError)
+        end
+      end
+    end
+    
+    describe "authorization_header" do
+      
+      it "should include the authorization bearer token when logged in via SOAP" do
+        @client.login_via_soap = true
+        @client.send(:authorization_header).should == {"Authorization" => "Bearer #{@sessionId}"}
+      end
+      
+      it "should include oauth token when not logged in via SOAP" do
+        @client.send(:authorization_header).should == {"Authorization" => "OAuth #{@client.oauth_token}"}
+      end
+    end
 
     context "with an omniauth response" do
       before do
@@ -320,6 +412,7 @@ describe Databasedotcom::Client do
           }.should raise_error(ArgumentError)
         end
       end
+      
     end
   end
 

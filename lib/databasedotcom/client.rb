@@ -574,8 +574,8 @@ module Databasedotcom
     end
 
     def parse_soap_auth_response(response)
-      @org_id = response[:loginResponse][:result][:organizationId] rescue nil
-      @user_id = response[:loginResponse][:result][:userId] rescue nil
+      @org_id = response[:loginResponse][:result][:userInfo][:organizationId] #rescue nil
+      @user_id = response[:loginResponse][:result][:userInfo][:userId] rescue nil
       self.instance_url = response[:loginResponse][:result][:serverUrl] rescue nil
       self.session_id = response[:loginResponse][:result][:sessionId] rescue nil
     end
